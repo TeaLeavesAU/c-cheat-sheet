@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Advanced C# Async Cheat Sheet</title>
+<style>
+    body { font-family:'Segoe UI', Tahoma, Geneva, Verdana,sans-serif; margin:0; background:linear-gradient(to right,#1f2c34,#283845); color:#f0f0f0;}
+    .container{display:flex;max-width:1500px;margin:0 auto;}
+    nav{width:250px;background-color:rgba(30,40,52,0.95);padding:20px;border-right:1px solid #3a4a5c;height:100vh;position:sticky;top:0;}
+    nav h2{color:#ffd166;text-align:center;}
+    nav ul{list-style:none;padding-left:0;}
+    nav li{margin:12px 0;}
+    nav a{color:#f0f0f0;text-decoration:none;font-weight:500;}
+    nav a:hover{color:#ffd166;text-decoration:underline;}
+    main{flex:1;padding:20px;max-width:1200px;}
+    h1,h2,h3{color:#ffd166;}
+    section{margin-bottom:50px;padding-bottom:20px;border-bottom:1px solid #3a4a5c;}
+    table{width:100%;border-collapse:collapse;margin-top:20px;}
+    th,td{padding:12px 15px;text-align:left;}
+    th{background-color:#3a4a5c;color:#ffd166;}
+    tr:nth-child(even){background-color:#2e3b4c;}
+    tr:hover{background-color:#455a6b;}
+    .yes{color:#00ff7f;font-weight:bold;}
+    .no{color:#ff4c4c;font-weight:bold;}
+    pre{background-color:#1b2a38;padding:12px;border-radius:6px;overflow-x:auto;color:#ffd166;position:relative;}
+    .copy-btn{position:absolute;top:10px;right:10px;background-color:#3a4a5c;color:#ffd166;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;}
+    .copy-btn:hover{background-color:#ffd166;color:#1b2a38;}
+    .note{margin-top:20px;padding:15px;background-color:#3a4a5c;border-left:5px solid #ffd166;border-radius:6px;}
+    .collapsible{background-color:#2e3b4c;color:#ffd166;cursor:pointer;padding:10px 15px;width:100%;border:none;text-align:left;outline:none;font-size:16px;border-radius:6px;margin-top:10px;}
+    .active,.collapsible:hover{background-color:#455a6b;}
+    .content{padding:0 15px;display:none;overflow:hidden;margin-top:5px;border-left:2px solid #ffd166;}
+</style>
+</head>
+<body>
+<div class="container">
+    <nav>
+        <h2>Async Cheat Sheet</h2>
+        <ul>
+            <li><a href="#configureawait">ConfigureAwait(false)</a></li>
+            <li><a href="#task-patterns">Task Patterns</a></li>
+            <li><a href="#whenall-any">Task.WhenAll / WhenAny</a></li>
+            <li><a href="#taskdelay">Task.Delay</a></li>
+            <li><a href="#semaphoreslim">SemaphoreSlim</a></li>
+            <li><a href="#cancellationtoken">CancellationToken</a></li>
+            <li><a href="#iasyncenumerable">IAsyncEnumerable</a></li>
+            <li><a href="#parallelf">Parallel.ForEachAsync</a></li>
+            <li><a href="#valuetask">ValueTask</a></li>
+            <li><a href="#channel">Channel&lt;T&gt;</a></li>
+            <li><a href="#asynclazy">AsyncLazy&lt;T&gt;</a></li>
+            <li><a href="#best-practices">Best Practices</a></li>
+        </ul>
+    </nav>
+    <main>
+        <section id="configureawait">
+            <h1>ConfigureAwait(false)</h1>
+            <button class="collapsible">Details</button>
+            <div class="content">
+                <p>Use in library/service code to avoid capturing the current context. Safe for non-UI code and background tasks.</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Context</th>
+                            <th>Use ConfigureAwait(false)?</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Blazor UI/Component</td><td class="no">No</td><td>Must resume on renderer context</td></tr>
+                        <tr><td>Service/Library (no UI)</td><td class="yes">Yes</td><td>Context-agnostic</td></tr>
+                        <tr><td>Web API Controller</td><td class="no">Optional</td><td>Continuation runs on thread pool</td></tr>
+                        <tr><td>EF Core Repositories</td><td class="yes">Yes</td><td>Safe for async DB calls</td></tr>
+                        <tr><td>Hangfire / Background Jobs</td><td class="no">Optional</td><td>No UI context</td></tr>
+                        <tr><td>Console App</td><td class="no">Optional</td><td>No UI thread</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="task-patterns">
+            <h1>Task Patterns</h1>
+            <button class="collapsible">Concurrent Tasks</button>
+            <div class="content">
+                <pre><code>var tasks = new List&lt;Task&gt;();
+foreach(var userId in userIds)
+{
+    tasks.Add(_notificationService.SendWelcomeEmailAsync(userId));
+}
+await Task.WhenAll(tasks);</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+            </div>
+            <button class="collapsible">SemaphoreSlim Throttle</button>
+            <div class="content">
+                <pre><code>private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(10);
+
+var tasks = productIds.Select(async id =&gt;
+{
+    await _semaphore.WaitAsync();
+    try { return await _api.GetProductAsync(id); }
+    finally { _semaphore.Release(); }
+}).ToList();
+
+await Task.WhenAll(tasks);
+return tasks.Select(t =&gt; t.Result).ToList();</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+            </div>
+        </section>
+
+        <section id="whenall-any">
+            <h1>Task.WhenAll / Task.WhenAny</h1>
+            <button class="collapsible">Examples</button>
+            <div class="content">
+                <pre><code>await Task.WhenAll(task1, task2, task3);
+var first = await Task.WhenAny(task1, task2, task3);</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+            </div>
+        </section>
+
+        <section id="taskdelay">
+            <h1>Task.Delay</h1>
+            <button class="collapsible">Examples</button>
+            <div class="content">
+                <pre><code>await Task.Delay(1000); // 1 second
+await Task.Delay(TimeSpan.FromSeconds(5));</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+            </div>
+        </section>
+
+        <section id="semaphoreslim">
+            <h1>SemaphoreSlim</h1>
+            <button class="collapsible">Concurrency Control</button>
+            <div class="content">
+                <pre><code>private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(5);
+await _semaphore.WaitAsync();
+try { await SomeAsyncOperation(); } 
+finally { _semaphore.Release(); }</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+            </div>
+        </section>
+
+        <section id="cancellationtoken">
+            <h1>CancellationToken</h1>
+            <button class="collapsible">Example</button>
+            <div class="content">
+                <pre><code>var cts = new CancellationTokenSource();
+await SomeAsyncOperation(cts.Token);
+cts.Cancel();</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+            </div>
+        </section>
+
+        <section id="iasyncenumerable">
+            <h1>IAsyncEnumerable & await foreach</h1>
+            <button class="collapsible">Example</button>
+            <div class="content">
+                <pre><code>public async IAsyncEnumerable&lt;Customer&gt; GetCustomersAsync()
+{
+    await foreach(var customer in _dbContext.Customers.AsAsyncEnumerable())
+    {
+        yield return customer;
+    }
+}</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+            </div>
+        </section>
+
+        <section id="parallelf">
+            <h1>Parallel.ForEachAsync</h1>
+            <button class="collapsible">Example</button>
+            <div class="content">
+                <pre><code>await Parallel.ForEachAsync(userIds, new ParallelOptions { MaxDegreeOfParallelism = 10 }, async (id, token) =&gt;
+{
+    await _notificationService.SendWelcomeEmailAsync(id, token);
+});</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+            </div>
+        </section>
+
+        <section id="valuetask">
+            <h1>ValueTask&lt;T&gt;</h1>
+            <button class="collapsible">Example & Benefits</button>
+            <div class="content">
+                <pre><code>public ValueTask&lt;int&gt; GetCachedValueAsync()
+{
+    if (_cache.HasValue) return new ValueTask&lt;int&gt;(_cache.Value);
+    return new ValueTask&lt;int>(ComputeAsync());
+}</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+                <p>✅ Reduces allocations when result is already available synchronously</p>
+            </div>
+        </section>
+
+        <section id="channel">
+            <h1>Channel&lt;T&gt;</h1>
+            <button class="collapsible">Producer / Consumer Example</button>
+            <div class="content">
+                <pre><code>var channel = Channel.CreateUnbounded&lt;int&gt;();
+
+// Producer
+_ = Task.Run(async () =&gt; { for(int i=0;i&lt;100;i++) await channel.Writer.WriteAsync(i); channel.Writer.Complete(); });
+
+// Consumer
+await foreach(var item in channel.Reader.ReadAllAsync())
+{
+    Console.WriteLine(item);
+}</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+            </div>
+        </section>
+
+        <section id="asynclazy">
+            <h1>AsyncLazy&lt;T&gt;</h1>
+            <button class="collapsible">Pattern Example</button>
+            <div class="content">
+                <pre><code>public class AsyncLazy&lt;T&gt;
+{
+    private readonly Lazy&lt;Task&lt;T&gt;&gt; _instance;
+    public AsyncLazy(Func&lt;Task&lt;T&gt;&gt; factory) =&gt; _instance = new Lazy&lt;Task&lt;T&gt;&gt;(factory);
+    public Task&lt;T&gt; Value =&gt; _instance.Value;
+}</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+            </div>
+        </section>
+
+        <section id="best-practices">
+            <h1>Best Practices</h1>
+            <div class="note">
+                <ul>
+                    <li>Use <code>ConfigureAwait(false)</code> in libraries that don’t touch UI.</li>
+                    <li>Prefer <code>Task.WhenAll</code> for concurrent IO-bound operations.</li>
+                    <li>Throttle with <code>SemaphoreSlim</code> or <code>Parallel.ForEachAsync</code>.</li>
+                    <li>Use <code>CancellationToken</code> for long-running tasks.</li>
+                    <li>Use <code>IAsyncEnumerable</code> or <code>Channel&lt;T&gt;</code> for streaming/producer-consumer scenarios.</li>
+                    <li>Consider <code>ValueTask</code> for hot paths to reduce allocations.</li>
+                    <li>AsyncLazy&lt;T&gt; is great for deferred async initialization.</li>
+                    <li>Avoid blocking calls (<code>.Result</code> or <code>.Wait()</code>) on async code.</li>
+                </ul>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script>
+const coll = document.getElementsByClassName("collapsible");
+for (let i = 0; i < coll.length; i++) {
+    coll[i].addEventListener("click", function() {
+        this.classList.toggle("active");
+        const content = this.nextElementSibling;
+        content.style.display = content.style.display === "block" ? "none" : "block";
+    });
+}
+
+function copyCode(btn) {
+    const code = btn.previousElementSibling.textContent;
+    navigator.clipboard.writeText(code).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 1000);
+    });
+}
+</script>
+</body>
+</html>
